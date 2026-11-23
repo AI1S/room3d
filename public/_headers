@@ -1,0 +1,12 @@
+# Cloudflare Pages 会读 dist/_headers（本文件随 public/ 一起进 dist）
+# Vercel 不读这个文件，它读根目录的 vercel.json
+
+/scans/*.splat
+  Content-Type: application/octet-stream
+  Cache-Control: public, max-age=31536000, immutable
+
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/scans/index.json
+  Cache-Control: no-cache

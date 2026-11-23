@@ -1,0 +1,17 @@
+# 默认按文本处理，但强制 LF（跨 Windows/Mac 协作不出假 diff）
+* text=auto eol=lf
+
+# 二进制资源：不要做换行转换，也不要当文本 diff
+*.splat binary
+*.ply binary
+*.spz  binary
+*.ksplat binary
+*.sog  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.mp4  binary
+*.mov  binary
+
+# 示例房源是发布产物，别让 GitHub 语言统计把它算进代码量
+public/scans/** linguist-generated=true
