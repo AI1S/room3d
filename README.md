@@ -93,6 +93,39 @@ py scripts/pipeline.py --reindex     # = npm run index
 --keep-meta            # 只换 splat，保留已经填好的 meta.json
 ```
 
+## 本地一键重建（COLMAP + Brush，不花钱路线）
+
+W2 的管线默认"重建这步你自己跑（Postshot）"。这条是本机全自动版本，一条命令从视频跑到网页房源：
+
+```bash
+bash scripts/rebuild.sh data/test2.mp4 dorm --title "宿舍 2 号床"
+# = npm run rebuild -- data/test2.mp4 dorm --title "宿舍 2 号床"
+```
+
+它做的事（每步都有耗时输出）：
+
+| 步骤 | 工具 | 说明 |
+| --- | --- | --- |
+| 1. 抽帧 | ffmpeg | 默认 2 fps，长边 1600 |
+| 2. 位姿 + 稀疏点云 | COLMAP 4.2.1 | feature_extractor → sequential_matcher(overlap 10) → mapper |
+| 3. 训练高斯泼溅 | Brush 0.3.0 | headless，默认 15000 步、sh_degree 0、最多 200 万点、最多 600 帧 |
+| 4. 导出 + 发布 | ply_to_splat + pipeline.py | PLY → .splat → `public/scans/<id>/` → 重建索引 |
+
+**建图失败会自动加帧率重试一次**：先 2 fps，注册率 < 1/3 就换 6 fps 再来一遍（帧间重叠更多）。两轮都失败说明这条视频不能用，按 [docs/capture-sop.md](docs/capture-sop.md) 重拍。
+
+本机工具位置（不在 PATH 里，脚本会自动找；换机器就设环境变量 `FFMPEG` / `COLMAP_BIN` / `BRUSH_BIN`）：
+
+```
+C:\Users\liaos\AI\tools\3dgs\colmap\bin\colmap.exe     # COLMAP 4.2.1 (CUDA)
+C:\Users\liaos\AI\tools\3dgs\brush\brush_app.exe         # Brush 0.3.0（GUI 和 CLI 是同一个 exe）
+%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg_*\...\bin\ffmpeg.exe
+```
+
+都要自己下（约 570 MB）：COLMAP 放 [colmap releases](https://github.com/colmap/colmap/releases) 的 `colmap-x64-windows-cuda.zip`；Brush 放 [brush releases](https://github.com/ArthurBrussee/brush/releases) 的 `brush-app-x86_64-pc-windows-msvc.zip`。
+
+> 为什么不用 nerfstudio splatfacto：Windows 上编译 tiny-cuda-nn 很痛苦。Brush 是 Rust 写的、单 exe、直接吃 COLMAP 数据集、自带 CUDA 训练，4090 Laptop 上开箱能用。
+> 想要更好画质/更多控制就换 Postshot（GUI）或 LSplat，产物照样能用 `pipeline.py --splat` 接管。
+
 ## 部署（静态站）
 
 前端是纯静态的，`vite.config.js` 里 `base: './'`，丢到任何静态托管都能跑。
@@ -137,6 +170,7 @@ room3d/
 │     ├─ demo/                # 合成示例：meta.json + scene.splat(6.9MB) + scene2.splat(5.0MB)
 │     └─ <id>/                # 真实房源：scene.splat + meta.json
 ├─ scripts/
+│  ├─ rebuild.sh              # 本地一键重建：视频 → COLMAP → Brush → 发布
 │  ├─ pipeline.py             # W2 一键管线：视频/PLY → public/scans/<id>/
 │  ├─ ply_to_splat.py         # 3DGS PLY → .splat 转换（numpy 可选，纯 stdlib 也能跑）
 │  ├─ make_sample_splat.py    # 生成示例 .splat（合成房间，无第三方依赖）
@@ -165,6 +199,9 @@ room3d/
 - **`/scans` 不要做代理**：演示数据在 `public/`，vite 里把 `/scans` 代理到后端会导致 502。现在只代理 `/api`。
 - **ffmpeg 未安装**：管线会直接告诉你装法，不要硬跑。`winget install Gyan.FFmpeg`，装完重开终端。
 - **PLY 转完"表面像梳子/条纹"**：四元数分量顺序不对，加 `--quat-order xyzw` 重转（3DGS 官方是 wxyz）。
+- **COLMAP 4.2 参数改名**：`--SiftExtraction.use_gpu` → `--FeatureExtraction.use_gpu`，`--SiftMatching.use_gpu` → `--FeatureMatching.use_gpu`。写旧名字会直接报错退出。
+- **Brush 没有 `brush.exe`**：压缩包里只有 `brush_app.exe`，不加 `--with-viewer` 就是纯命令行训练。
+- **COLMAP 只注册了 2 张图**（`Discarding reconstruction due to no initial pair`）：抽帧间隔太长 / 手持转太快，相邻帧没有重叠。实测 2 fps 对着快速扫视的视频会全军覆没，把 fps 提到 6–10 再试。
 - **真实场景"躺平"或"倒挂"**：COLMAP 常是 Z 朝上，加 `--up z-to-y`；临时看可以在网页点「修正朝向」。
 - **手机上看不到场景中心**：3D 画布会占满整屏而面板压住下半屏 → 看到的是一片墙。已用 `layout()` 把画布高度让出来。
 - **vite 只监听 IPv6**：用 `localhost:5173` 打开；`127.0.0.1` 可能连不上（手机预览要加 `--host`）。

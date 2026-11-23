@@ -16,7 +16,8 @@
     "deploy": "vercel --prod",
     "deploy:preview": "vercel",
     "serve:dist": "npx --yes serve dist -l 4173",
-    "publish:pages": "bash scripts/publish-pages.sh"
+    "publish:pages": "bash scripts/publish-pages.sh",
+    "rebuild": "bash scripts/rebuild.sh"
   },
   "dependencies": {
     "@sparkjsdev/spark": "2.4.0",
