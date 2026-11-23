@@ -1,0 +1,27 @@
+{
+  "name": "room3d",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "手机扫描房间 -> 3D 高斯泼溅漫游 + 户型问答（W1 骨架 + W2 一键管线）",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "sample": "py scripts/make_sample_splat.py",
+    "pipeline": "py scripts/pipeline.py",
+    "convert": "py scripts/ply_to_splat.py",
+    "index": "py scripts/pipeline.py --reindex",
+    "api": "py -m uvicorn server.main:app --reload --port 8000",
+    "deploy": "vercel --prod",
+    "deploy:preview": "vercel",
+    "serve:dist": "npx --yes serve dist -l 4173"
+  },
+  "dependencies": {
+    "@sparkjsdev/spark": "2.4.0",
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "vite": "8.3.8"
+  }
+}
