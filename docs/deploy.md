@@ -98,11 +98,33 @@ npm run build
 npx wrangler pages deploy dist --project-name room3d
 ```
 
+## 2C. GitHub Pages（已上线，零账号依赖）
+
+**线上地址：https://ai1s.github.io/room3d/**（已验证：首页 200、`scans/index.json` 200、`scans/demo/scene.splat` 200 且 `content-type: application/octet-stream`、无头浏览器打开能渲染并能切房源、console 无报错）
+
+不需要 Vercel 账号，用仓库自己的 `gh-pages` 分支托管静态产物。当前配置：
+
+- Pages 源：分支 `gh-pages`、路径 `/`、`build_type=legacy`（在仓库 Settings → Pages 能看到）
+- `gh-pages` 分支只放构建产物（含 `.nojekyll`），**和源码 main 分支完全分开**，源码不重复提交 dist
+- 发布命令（改完代码跑这一条，30–90 秒后线上生效）：
+
+```bash
+npm run publish:pages      # = bash scripts/publish-pages.sh：build → 同步到 ../_room3d_ghp → commit → push
+```
+
+已知限制（和 Vercel/CF 的差别）：
+
+| 项 | 情况 |
+| --- | --- |
+| 自定义响应头 | GitHub Pages 不支持 `_headers`/`vercel.json` 那套。但实测 `.splat` 已被 Pages 以 `application/octet-stream` 返回，渲染没问题；只是**没有长缓存头**，刷新会重新校验 |
+| 国内访问 | `*.github.io` 有时不稳/慢；要稳就还是 Vercel 或 Cloudflare Pages |
+| 后续可升级 | 想改成"push 自动构建"，需要 token 有 `workflow` scope：`gh auth refresh -h github.com -s workflow`，再把 `.github/workflows/pages.yml` 加回仓库（文件内容见 git 历史里的方案：checkout + node22 + npm ci/build + upload-pages-artifact + deploy-pages） |
+
 ## 3. 部署完要自己验这 4 条
 
 ```bash
-# 把 BASE 换成你的线上地址
-BASE=https://room3d-xxxx.vercel.app
+# 把 BASE 换成你的线上地址（GitHub Pages 已验证可用）
+BASE=https://ai1s.github.io/room3d
 
 curl -sI $BASE/scans/demo/scene.splat | head -5     # 期望 200 + content-type: application/octet-stream
 curl -s  $BASE/scans/index.json | head -5           # 期望 JSON，能看到 demo / selftest
@@ -126,6 +148,8 @@ curl -s  $BASE/scans/index.json | head -5           # 期望 JSON，能看到 de
 | 换房源后标题不对 | 已经修过：`loadSplat` 直接用 label 设标题，不再靠相对 url 匹配 |
 | `vercel deploy` 报 `EPERM ... symlink ... builders-vlt`（本机实测） | Windows 不给普通进程创建符号链接，Vercel CLI 装远程 builder 时卡在这。三条路：①**直接用网页导入**（推荐，构建在云端跑，不碰本地符号链接）；②开「开发者模式」（设置 → 系统 → 开发者选项 → 开发人员模式，或 `start ms-settings:developers`）后重开终端再 `npm run deploy`；③用管理员权限开一个终端跑。 |
 | `vercel` 提示 Logged out | 先 `vercel login`（会开浏览器）；不登录只能用 `--temporary`，本机因上面的符号链接问题走不通 |
+| Vercel 注册收不到手机验证码（+86） | ①**首选：注册页点 Back，改用「Continue with GitHub」授权**（AI1S 账号已登录浏览器，OAuth 注册一般不再要短信）；②必须手机号时：确认手机没开"拒收境外短信"、翻拦截/垃圾短信、等 2–3 分钟再 Back 重来一次、换个代理节点；③不想折腾就用 2C 的 GitHub Pages，已上线 |
+| push 被拒：`refusing to allow an OAuth App to create or update workflow` | GitHub CLI 的 token 缺 `workflow` scope，推不了 `.github/workflows/*`。`gh auth refresh -h github.com -s workflow` 加权限（要再走一次设备码）后即可 |
 
 ## 5. 回滚
 

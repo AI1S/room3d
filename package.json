@@ -15,7 +15,8 @@
     "api": "py -m uvicorn server.main:app --reload --port 8000",
     "deploy": "vercel --prod",
     "deploy:preview": "vercel",
-    "serve:dist": "npx --yes serve dist -l 4173"
+    "serve:dist": "npx --yes serve dist -l 4173",
+    "publish:pages": "bash scripts/publish-pages.sh"
   },
   "dependencies": {
     "@sparkjsdev/spark": "2.4.0",
