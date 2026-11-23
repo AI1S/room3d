@@ -12,19 +12,34 @@ npm run preview        # http://localhost:4173 打开验证一遍（用 localhos
 
 构建通过再往下走。**dist/ 不要提交**（已在 .gitignore 里），托管平台会自己构建。
 
-## 1. GitHub 首次提交
+## 1. GitHub 首次提交（已完成）
 
-本机已经初始化好仓库并做了第一次提交（分支 `main`）。剩下只有「建远程仓库 + push」：
+远程仓库已建好：**https://github.com/AI1S/room3d**（Public，MIT LICENSE），本地 `main` 已 rebase 到远端 LICENSE 提交之上并 push，历史是一条直线：
 
-1. 打开 https://github.com/new ，Repository name 填 `room3d`，**不要**勾 "Add a README / .gitignore / license"（仓库里已经有了），Private 或 Public 都行。
-2. 建完 GitHub 会给你一段命令，用这两行（把 URL 换成你自己的）：
+```
+96e9b44  W1+W2：3D 房源漫游骨架 + 一键重建管线
+8e4ea21  Initial commit（MIT LICENSE）
+```
+
+本机相关配置（都已写好，换机器才需要重做）：
+
+| 项 | 值 |
+| --- | --- |
+| 代理 | `git config --local http.proxy=http://127.0.0.1:7890`（github.com:443 直连超时，必须走 Clash 代理；端口变了要改这里） |
+| 凭据 | GitHub CLI 提供 token：`gh auth login` 一次即可，不用输密码 |
+| 认证态 | `gh auth status` → Logged in as AI1S |
+
+换机器重建时（本机已经做完，留作记录）：
 
 ```bash
-git remote add origin https://github.com/<你的用户名>/room3d.git
+gh auth login                                   # 设备码登录，一次即可
+git config --local http.proxy http://127.0.0.1:7890   # github.com:443 直连超时，走 Clash
+git config --local credential.helper '!"C:/Program Files/GitHub CLI/gh.exe" auth git-credential'
+git remote add origin https://github.com/AI1S/room3d.git
 git push -u origin main
 ```
 
-第一次 push 会弹浏览器登录（Git Credential Manager），登一次以后就不用再输密码。
+> 本机 git **没有** Git Credential Manager，所以别再按"会弹浏览器登录"的旧路子走；认证统一交给 GitHub CLI 的 token。
 
 > 仓库大小：约 13MB（.git 压完 7.2MB），主要是 `public/scans/demo/`（11.8MB）和 `public/scans/selftest/`（0.9MB）里的 .splat。GitHub 单文件上限 100MB，够用。以后真实房源建议单个 .splat ≤ 15MB（见 README「体积账」）。
 
