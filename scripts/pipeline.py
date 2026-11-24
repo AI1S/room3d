@@ -472,18 +472,18 @@ def main(argv=None):
 
     log("2/4", "重建产物：%s（%s）" % (src, human_size(src)))
 
-    # 3. 转成发布格式
-    _, points = to_format(src, work_asset, args.format, args.max_points, args.up,
-                          args.quat_order, args.trim, args.opacity_min, filter_box)
-
-    # 4. 发布 + 索引
-    camera = camera_from_colmap(args.camera_from) if args.camera_from else None
+    # 3. 转成发布格式（先把裁剪盒算出来，to_format 要用）
     filter_box = args.filter_box
     if args.crop_cameras and args.camera_from:
         auto_box = bounds_from_colmap(args.camera_from, args.crop_cameras)
         if auto_box:
             log("3/4", "按相机包围盒裁剪（pad %s）：%s" % (args.crop_cameras, auto_box))
             filter_box = auto_box if not filter_box else filter_box
+    _, points = to_format(src, work_asset, args.format, args.max_points, args.up,
+                          args.quat_order, args.trim, args.opacity_min, filter_box)
+
+    # 4. 发布 + 索引
+    camera = camera_from_colmap(args.camera_from) if args.camera_from else None
     if camera:
         log("4/4", "默认机位：%s（fov %s°）" % (camera["position"], camera["fov"]))
     dst, meta_path = publish(scan_id, title, work_asset, args.public_dir,
