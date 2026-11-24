@@ -20,6 +20,7 @@ const state = {
   loading: false,
   scans: [],   // W2：public/scans/index.json 里的房源列表
   scanId: null,
+  view: null,  // meta.camera：真实扫描的默认机位（来自 COLMAP 位姿），没有就用启发式取景
 };
 
 /* ---------------- 渲染器 ---------------- */
@@ -37,7 +38,8 @@ renderer.setClearColor(0x0a0b0d, 1);
 app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 600);
+const BASE_FOV = 70;
+const camera = new THREE.PerspectiveCamera(BASE_FOV, window.innerWidth / window.innerHeight, 0.05, 600);
 camera.position.set(0, 1.6, 3);
 
 const spark = new SparkRenderer({ renderer });
@@ -108,12 +110,22 @@ function fitView(mesh) {
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z) || 1;
 
-  // 默认视角：站在房间里偏高的一侧往里看（室内看房视角），而不是站在墙外面
-  controls.target.copy(center);
-  const portrait = camera.aspect < 0.9 ? 1.18 : 1;
-  camera.position.copy(center).add(
-    new THREE.Vector3(size.x * 0.21 * portrait, size.y * 0.17, size.z * 0.30 * portrait)
-  );
+  if (state.view && state.view.position && state.upAxis === 'y') {
+    // 真实扫描：用 COLMAP 位姿里算出来的机位，直接站在拍摄者站过的地方
+    const v = state.view;
+    const t = v.target || [center.x, center.y, center.z];
+    camera.position.set(v.position[0], v.position[1], v.position[2]);
+    controls.target.set(t[0], t[1], t[2]);
+    camera.fov = v.fov ? Math.min(90, Math.max(35, v.fov)) : BASE_FOV;
+  } else {
+    // 默认视角：站在房间里偏高的一侧往里看（室内看房视角），而不是站在墙外面
+    camera.fov = BASE_FOV;
+    controls.target.copy(center);
+    const portrait = camera.aspect < 0.9 ? 1.18 : 1;
+    camera.position.copy(center).add(
+      new THREE.Vector3(size.x * 0.21 * portrait, size.y * 0.17, size.z * 0.30 * portrait)
+    );
+  }
   camera.near = Math.max(0.02, maxDim / 400);
   camera.far = Math.max(60, maxDim * 40);
   camera.updateProjectionMatrix();
@@ -344,6 +356,7 @@ function scanFromHash() {
 function applyMeta(meta, entry) {
   state.meta = meta;
   state.scanId = entry.id;
+  state.view = meta.camera || null;
   document.title = (meta.title || entry.title || 'Room3D') + ' · Room3D';
   $('sceneTitle').textContent = meta.title || entry.title || '';
   renderMetrics(meta.metrics || []);
@@ -461,3 +474,8 @@ window.addEventListener('keydown', (e) => {
 });
 
 boot();
+
+// 调试钩子（只在本机用 ?debug=1 时暴露，便于诊断相机与包围盒）
+if (new URLSearchParams(location.search).has("debug")) {
+  window.__r3d = { THREE, camera, controls, scene, spark, renderer, state, fitView };
+}

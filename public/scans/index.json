@@ -1,5 +1,5 @@
 {
-  "generated": "2026-11-23T22:39:27+08:00",
+  "generated": "2026-11-24T19:23:10+08:00",
   "scans": [
     {
       "id": "demo",
@@ -8,6 +8,14 @@
       "sceneCount": 2,
       "points": null,
       "updated": "2026-11-23T21:20:18+08:00"
+    },
+    {
+      "id": "dorm",
+      "title": "宿舍（手机实拍重建）",
+      "metaUrl": "scans/dorm/meta.json",
+      "sceneCount": 1,
+      "points": 894000,
+      "updated": "2026-11-24T19:23:05+08:00"
     },
     {
       "id": "selftest",

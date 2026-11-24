@@ -7,10 +7,17 @@
 - **W1（已完成）**：先证明「一个链接打开就能 3D 看房 + 问问题」这条路通，场景用脚本合成的房间代替。
 - **W2（本次）**：把「视频 / 重建产物 → 网页房源」串成一条命令，并加好静态部署配置。
 
-> 仓库自带两套房源：`scans/demo`（脚本合成的两居室，演示用）和 `scans/selftest`（W2 管线自测：把演示场景转成 3DGS PLY 再转回 .splat 的往返结果，28079 点）。所以一打开就能看到顶栏的「房源下拉」；自己跑一次 `pipeline.py` 就会多出第三套。
+> 仓库自带三套房源：`scans/demo`（脚本合成的两居室，演示用）、`scans/selftest`（W2 管线自测：把演示场景转成 3DGS PLY 再转回 .splat 的往返结果，28079 点）
+> 和 `scans/dorm`（**手机实拍的真实宿舍**：1080p30 竖屏 4 分 12 秒 → 6fps 1514 帧 → COLMAP 注册 1468 张（97%）→ Brush 训练 100 万点 → .spz 14.5 MB / 89.4 万点）。
+> 顶栏的「房源下拉」就是切这三套；自己跑一次 `pipeline.py` 就会多出一套。
 
 ![桌面端](docs/screenshots/desktop.png)
 ![手机端](docs/screenshots/mobile.png)
+
+手机实拍宿舍（真实重建，不是合成场景）：
+
+![宿舍桌面端](docs/screenshots/dorm-desktop.png)
+![宿舍手机端](docs/screenshots/dorm-mobile.png)
 
 ## 现在能做什么
 
@@ -27,6 +34,9 @@
 | **3DGS PLY → .splat 转换** | ✅ W2 | `scripts/ply_to_splat.py`：SH0 颜色、log 尺度、四元数编码、透明度剪枝、降采样 |
 | **视频 → 发布一条龙** | ✅ W2 | `py scripts/pipeline.py`：抽帧 → 收重建产物 → 转格式 → 发布 → 重建索引 |
 | **静态部署配置** | ✅ W2 | `vercel.json` + `public/_headers`（Cloudflare Pages），.splat 走 octet-stream + 长缓存 |
+| **真实手机视频重建** | ✅ W2 | 宿舍实拍 4 分 12 秒 → 1468/1514 帧注册 → 89.4 万点 / 14.5 MB；一键脚本 `scripts/rebuild.sh`（COLMAP + Brush，本地免费） |
+| **发布格式 spz / sog** | ✅ W2 | 同一份 100 万点重建：.splat 32 MB → .spz 14.5 MB → .sog 10.9 MB（`--format`） |
+| **真实机位默认视角 + 自动裁剪** | ✅ W2 | `--camera-from`（从 COLMAP 位姿算默认机位写进 `meta.camera`）、`--crop-cameras`（按相机包围盒裁飘浮点） |
 | 上传视频 → 抽帧 API | ✅ | FastAPI（只在本地跑），需要本机装 ffmpeg |
 | VLM 出结构化 JSON | ⬜ W4 | meta.json 现在是手写的 / 管线生成占位，W4 由 VLM 生成 |
 | LLM 问答 | ⬜ W5 | 现在是关键词匹配的替身，顺序（先判"不能答"）已经定好 |
@@ -209,18 +219,25 @@ room3d/
 - **dev server 开着的时候改 `src/` 里的文件**：Windows 上偶尔报 `EIO`/`ReplaceFileW`（文件被 vite 监听占用），先停 dev server 再改。
 - **大文件**：场景是 7 MB 左右的静态文件，先看进度条（`onProgress`），不要以为卡死。
 - **打包体积**：`three` + `spark` 打包后 JS 约 3.2 MB（gzip 1.08 MB）。W2 只做了 .splat 长缓存，代码拆分留到以后。
+- **Brush 训练出来整体飘在相机外面（网页里一团雾）**：数据目录里只要有**第二个 COLMAP 模型**（`sparse2/`、旧 attempt 目录残留），Brush 0.3.0 就会"随便挑一个 points3D.bin"当初始点，于是 A 模型的相机配 B 模型的点。给它的目录必须只有一个 `sparse/0`；`scripts/rebuild.sh` 现在会自动搭 `bset/`（单模型 + `images` 目录联接）。
+- **网页里是雾/放射条纹，但 Brush 自己的 eval 图是清楚的**：先查发布时有没有盲目降采样（见体积账最后一行的警告），再看默认机位——相机落在场景包围盒外面时 3DGS 只能渲染出雾。用 `--camera-from <sparse/0>` 让管线把真实机位写进 `meta.camera`。
+- **splat-transform 的参数顺序**：动作（`-B` 裁剪、`-d` 降采样、`-r` 旋转）必须写在**输入文件之后**，写在前面会被静默忽略（输出还是没裁过的）。
 - **更多报错原文和当时的误判**：见 [docs/log.md](docs/log.md)——按阶段记的踩坑时间线（COLMAP 参数改名、Brush 没有 brush.exe、代理、Vercel 的 EPERM 软链等）。
 
 ## 体积账（为什么不像原方案那样卡 100 MB）
 
-| 格式 | 每点字节 | 200 万点 | 备注 |
+| 格式 | 每点字节 | 200 万点 | 本机实测（宿舍，100 万点训练 / 89.4 万点发布） |
 | --- | --- | --- | --- |
-| 3DGS PLY (sh0) | 56 B | 112 MB | 训练默认导出 |
-| .splat | 32 B | 64 MB | 常见网页格式（本项目用这个） |
-| SOG / 压缩 | ~2–6 B | 5–12 MB | 需要额外压缩步骤 |
+| 3DGS PLY (sh0) | 56 B | 112 MB | 100 万点 = 53 MB |
+| .splat | 32 B | 64 MB | 100 万点 = 32 MB |
+| .spz | ~17 B | 34 MB | **89.4 万点 = 14.5 MB** |
+| .sog | ~14 B | 28 MB | 100 万点 = 10.9 MB |
 
-结论：**别写"整包 ≤ 100 MB"**，写成"首屏按 LOD 流式加载，单房间首屏 ≤ 10 MB"。
-示例场景 6.9 MB / 22 万点，属于"能看但不够细"，真实房源目标是 50–100 万点、首屏 8–15 MB（管线里用 `--max-points` 压）。
+结论：**别写"整包 ≤ 100 MB"**，写成"首屏按 LOD 流式加载，单房间首屏 ≤ 15 MB"。
+管线默认 `--format spz`：同一份 100 万点重建，`.splat` 32 MB、`.spz` 14.5 MB、`.sog` 10.9 MB。
+
+> ⚠️ 别为了省体积盲目 `--max-points` 降采样：实测把 408 万点砍到 80 万点后，该模型 opacity 中位数只有 0.042，
+> 点一稀就整体半透明，网页里看起来就是"一团雾"。要么提高训练质量，要么只裁离群点（`--crop-cameras`）。
 
 ## 合规红线（写进答辩也不要改）
 

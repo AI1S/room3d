@@ -159,6 +159,36 @@
   反而不需要配 header（只是没有长缓存）。
 - **教训**：上线路径要准备两条，别把交付卡在一个第三方注册页上。
 
+### 4.6 Brush 训练出来"整团飘在相机外面"（本轮最大坑）
+
+- **现象**：COLMAP 明明注册了 1468 张、重投影 1.298 px，Brush 也跑完 15000 步，但导出的 PLY 高斯全在相机体积之外
+  （点云 p50 z 7.51、相机 z 只有 −3.95..6.47），网页、Brush 自己的 eval 图、离线 numpy splat 全是雾/放射条纹。
+- **排查顺序（前四条都错了，但值得留着）**：①四元数顺序 wxyz/xyzw 两种都试 → 一样 ②units_per_meter 默认 1.0 → 排除
+  ③`crates/brush-serde/src/export.rs` 的 `splat_to_ply` 不做任何变换 → 排除导出 ④`colmap.rs` 相机加载/畸变模型都对 → 排除输入。
+- **真正原因**：`crates/brush-dataset/src/formats/colmap.rs` 的 `try_load_init()` 里
+  `vfs.files_ending_in("points3d.bin").next()` —— 它在**整个挂载目录树里取第一个** points3D.bin。
+  我们目录里同时有 `sparse/0`（1468 张 / 334385 点）和 `sparse2/0..3`（5 / 1468 / 43 / 28 张），于是相机来自 A、初始点来自 B。
+  日志里能肉眼看出不对：`Loading colmap dataset with 1468 images` 但 `Starting from colmap points 4353`。
+- **修法**：训练只喂一个干净目录 `bset/sparse/0` + `images`（PowerShell `New-Item -ItemType Junction` 建目录联接，不复制 1514 张图）。
+  修完日志变成 `1468 images` + `334385 points`，高斯数从 43 万一路长到 408 万。`scripts/rebuild.sh` 已自动化这一步。
+- **教训**：训练器的日志要逐行读"输入规模"两行是否自洽；工具"随机取第一个文件"式的隐藏行为，比参数错更难查。
+
+### 4.7 发布时盲目降采样，把好好的重建变成一团雾
+
+- **现象**：4M 点模型在页面里点「上传本地 splat」（整份 218 MB PLY）是**清晰的宿舍**；同一份数据走管线发布成 80 万点就是雾。
+- **原因**：该模型 opacity 中位数只有 0.042（3DGS 的透明度普遍偏低），随机砍点会让每个像素的叠加层数骤降 → 整体变半透明。
+  408 万 → 80 万的对比里，"清晰 vs 糊"只差这一个参数，跟坐标系、四元数、压缩都无关。
+- **修法**：①优先 `--format spz/sog` 压体积而不是砍点 ②必须砍时只裁离群点：`--crop-cameras 2.0`（按相机包围盒裁，
+  这次 100 万点只裁到 89.4 万，视觉无损）③训练时直接 `--max-splats 1000000`，让高斯自己长在这个预算内。
+- **教训**：判断"渲染坏了"之前，先用原文件做一次对照（这次是 `#fileInput` 直接载入 PLY）——能省好几天。
+
+### 4.8 splat-transform 的命令行顺序
+
+- **现象**：`npx @playcanvas/splat-transform -w in.ply -B box out.spz` 跑完点数没变（bbox 还是 −41..48 的离群值）。
+- **原因**：动作参数（`-B` / `-d` / `-r`）必须写在**输入文件之后**；写在输入前面会被静默忽略。
+- **另外**：`-V "scale_0,lt,0"` 这种过滤会把所有点筛没（`No Gaussians to write`），别用；`-F`（filter-floaters）有效但慢，4M 点要 4 分钟。
+- **教训**：第三方 CLI 的参数位置语义不查文档就得试；静默忽略比报错更坑。
+
 ## 一句话
 
 这份文件存在的意义：文档可以抄，报错抄不了。

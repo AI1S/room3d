@@ -2,7 +2,8 @@
 # 本地一键重建：视频 → 抽帧 → COLMAP 位姿 → Brush 训练 → PLY → .splat → 发布
 #
 # 用法：
-#   bash scripts/rebuild.sh <video> <id> [--title "宿舍"] [--fps 2] [--no-publish]
+#   bash scripts/rebuild.sh <video> <id> [--title "宿舍"] [--fps 6] [--no-publish]
+# 环境变量：STEPS / MAX_SPLATS / MAX_RESOLUTION / FORMAT(spz|splat) / SH_DEGREE
 # 例：
 #   bash scripts/rebuild.sh data/test2.mp4 dorm --title "宿舍 2 号床"
 #
@@ -18,6 +19,8 @@ SH_DEGREE="${SH_DEGREE:-0}"
 MAX_SPLATS="${MAX_SPLATS:-2000000}"
 MAX_FRAMES="${MAX_FRAMES:-600}"
 MAX_IMAGE_SIZE="${MAX_IMAGE_SIZE:-1600}"
+MAX_RESOLUTION="${MAX_RESOLUTION:-1080}"
+FORMAT="${FORMAT:-spz}"
 PUBLISH=1
 
 while [ $# -gt 0 ]; do
@@ -100,10 +103,16 @@ run_sfm() {
     >"$dir/log_match.txt" 2>&1 || { tail -5 "$dir/log_match.txt"; return 1; }
   echo >&2 "  $((SECONDS-t0))s"
 
-  echo >&2 "── COLMAP mapper（可能要 10–30 分钟）──"
+  # 4.2 的默认参数在 1500 张图上会每 ~10% 帧做一次全局 BA，慢到几小时；
+  # 放宽 BA 频率 + 降低内点门槛，先求「能注册」，离群点靠后面 filter_sparse.py 清。
+  echo >&2 "── COLMAP mapper（约 1 秒/张，1500 张 ≈ 25 分钟）──"
   t0=$SECONDS
   "$COLMAP_BIN" mapper \
     --database_path "$dir/db.db" --image_path "$dir/images" --output_path "$dir/sparse" \
+    --Mapper.ba_global_frames_ratio 5.0 --Mapper.ba_global_points_ratio 5.0 \
+    --Mapper.ba_global_max_refinements 1 --Mapper.ba_global_max_num_iterations 30 \
+    --Mapper.ba_local_max_num_iterations 10 \
+    --Mapper.abs_pose_min_num_inliers 15 --Mapper.init_min_num_inliers 50 \
     >"$dir/log_mapper.txt" 2>&1 || { tail -5 "$dir/log_mapper.txt"; return 1; }
   echo >&2 "  $((SECONDS-t0))s"
 
@@ -147,29 +156,59 @@ if [ "$(basename "$BEST")" != "0" ]; then
   cp -r "$BEST" "$DSET/sparse/0"
 fi
 
+# Brush 用 COLMAP 的 3D 点初始化高斯；mapper 放宽参数后离群点很多，
+# 不清掉会把场景撑到几倍大（网页里就变成一团雾），所以先过滤一遍。
 echo ""
-echo "── Brush 训练（${STEPS} 步，sh_degree=$SH_DEGREE，上限 $MAX_SPLATS 点）──"
+echo "── 过滤稀疏点（去掉离群/低观测 3D 点，Brush 初始化更干净）──"
+if py "$ROOT/scripts/filter_sparse.py" "$DSET/sparse/0" --out "$DSET/sparse_clean" 2>&1 | sed 's/^/  /'; then
+  rm -rf "$DSET/sparse/0"
+  cp -r "$DSET/sparse_clean" "$DSET/sparse/0"
+else
+  echo "  ⚠ 过滤脚本失败，用原始 sparse 继续训练"
+fi
+
+# Brush 0.3.0 的 COLMAP 加载器会在挂载目录里"随便挑一个 points3D.bin"，
+# 只要目录里有第二个 COLMAP 模型（sparse2/、attempt 目录残留…），就会拿 A 模型的相机
+# 配 B 模型的初始点 —— 结果是训练出来的高斯整体漂到相机外面，网页里就变成一团雾。
+# 所以训练只给它一个干净目录：bset/sparse/0 单模型 + images 目录联接（不复制，省空间）。
+STAGE="$DSET/bset"
+echo ""
+echo "── 搭 Brush 干净数据目录（bset：单模型 + images 联接）──"
+rm -rf "$STAGE"; mkdir -p "$STAGE/sparse"
+cp -r "$DSET/sparse/0" "$STAGE/sparse/0"
+if ! ( cd "$STAGE" && powershell -NoProfile -Command "New-Item -ItemType Junction -Path '$(cygpath -w "$STAGE/images")' -Target '$(cygpath -w "$DSET/images")' | Out-Null" ) >/dev/null 2>&1; then
+  echo "  联接建不出来，退回直接复制图片（占空间但能跑）"
+  cp -r "$DSET/images" "$STAGE/images"
+fi
+NPTS=$(py -c "import struct,sys;f=open(sys.argv[1],'rb');print(struct.unpack('<Q',f.read(8))[0])" "$STAGE/sparse/0/points3D.bin" 2>/dev/null)
+echo "  初始点：${NPTS:-?} 个（只来自 sparse/0，不会混到别的模型）"
+
+echo ""
+echo "── Brush 训练（${STEPS} 步，sh_degree=$SH_DEGREE，上限 $MAX_SPLATS 点，分辨率 $MAX_RESOLUTION）──"
 mkdir -p "$DSET/rebuild"
 t0=$SECONDS
-"$BRUSH_BIN" "$DSET" \
+"$BRUSH_BIN" "$STAGE" \
   --total-steps "$STEPS" --sh-degree "$SH_DEGREE" \
   --max-splats "$MAX_SPLATS" --max-frames "$MAX_FRAMES" \
+  --max-resolution "$MAX_RESOLUTION" \
   --export-path "$DSET/rebuild" --export-name scene.ply --export-every 999999 \
   2>&1 | tail -25
-echo "  训练耗时 $((SECONDS-t0))s"
+echo "  训练耗时 $((SECONDS-t0))s（Brush 的进度用 \\r 刷屏，重定向后日志是空的，看 GPU 占用就行）"
 
 PLY="$DSET/rebuild/scene.ply"
 [ -f "$PLY" ] || { echo "Brush 没有导出 $PLY（看上面的日志）"; exit 21; }
-echo "导出 $(ls -lh "$PLY" | awk '${print $5}') : $PLY"
+echo "导出 $(ls -lh "$PLY" | awk '{print $5}') : $PLY"
 
+PUB_ARGS=(--id "$ID" --title "$TITLE" --splat "$PLY"
+          --format "$FORMAT" --camera-from "$STAGE/sparse/0" --crop-cameras 2.0)
 if [ "$PUBLISH" = "1" ]; then
   echo ""
-  echo "── 转 .splat 并发布 ──"
-  py "$ROOT/scripts/pipeline.py" --id "$ID" --title "$TITLE" --splat "$PLY" || exit 22
+  echo "── 转 .$FORMAT 并发布（自动带默认机位 + 相机包围盒裁剪）──"
+  py "$ROOT/scripts/pipeline.py" "${PUB_ARGS[@]}" || exit 22
   echo ""
   echo "✅ 完成。本地预览：npm run dev 后打开 http://localhost:5173/#/scan/$ID"
 else
   echo ""
   echo "已跳过发布（--no-publish）。手动发布："
-  echo "  py scripts/pipeline.py --id $ID --title \"$TITLE\" --splat \"$PLY\""
+  echo "  py scripts/pipeline.py --id $ID --title \"$TITLE\" --splat \"$PLY\" --format $FORMAT --camera-from \"$STAGE/sparse/0\" --crop-cameras 2.0"
 fi

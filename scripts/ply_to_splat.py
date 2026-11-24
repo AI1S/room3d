@@ -335,6 +335,16 @@ def convert(args):
         if args.opacity_min > 0:
             keep &= op >= args.opacity_min
         keep &= np.isfinite(pos).all(axis=1)
+        # 去掉离群点：真实重建偶尔会在房间外飘出大量噪声高斯，
+        # 它们会把包围盒撑大，导致前端自动取景跑到房间外面去看一片雾。
+        if args.trim > 0:
+            lo = np.percentile(pos, args.trim, axis=0)
+            hi = np.percentile(pos, 100.0 - args.trim, axis=0)
+            inside = np.all((pos >= lo) & (pos <= hi), axis=1)
+            trimmed = int((keep & ~inside).sum())
+            if trimmed:
+                print("[ply_to_splat] %s%% 分位裁掉 %d 个离群点" % (args.trim, trimmed))
+            keep &= inside
         removed = int(count - int(keep.sum()))
         if removed:
             print("[ply_to_splat] 剪掉 %d 个点（透明度低/坐标非法）" % removed)
@@ -426,6 +436,8 @@ def main(argv=None):
     ap.add_argument("output", help="输出 .splat")
     ap.add_argument("--max-points", type=int, default=0, help="随机降采样到最多这么多点（0=不限制）")
     ap.add_argument("--opacity-min", type=float, default=0.005, help="透明度剪枝阈值（默认 0.005）")
+    ap.add_argument("--trim", type=float, default=0.0,
+                    help="按分位裁掉四周离群点（0=不裁；重建有飘浮噪声时用 1~2，单位是百分比）")
     ap.add_argument("--quat-order", choices=["wxyz", "xyzw"], default="wxyz",
                     help="PLY 里四元数的分量顺序，默认 wxyz（3DGS 官方）；画面出现梳齿/条纹改成 xyzw")
     ap.add_argument("--up", choices=["keep", "z-to-y"], default="keep",

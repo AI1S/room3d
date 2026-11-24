@@ -9,7 +9,7 @@
   1. 抽帧（ffmpeg）到 data/scans/<id>/frames/          —— 没有 ffmpeg 就提示怎么装
   2. 找重建产物：--splat 指定 / data/scans/<id>/rebuild/ 里丢的 PLY / --rebuild-cmd 跑命令
   3. 转成网页用的 .splat（32B/点，自动剪枝 + 可选降采样）
-  4. 发布到 public/scans/<id>/（scene.splat + meta.json），并重建 public/scans/index.json
+  4. 发布到 public/scans/<id>/（scene.splat / scene.spz + meta.json），并重建 public/scans/index.json
 
 也可以只用后半段（Postshot 已经导出了 PLY 的时候）：
 
@@ -24,6 +24,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import time
@@ -183,7 +184,7 @@ def run_rebuild_cmd(template, frames_dir, out_path):
 
 
 # ---------------------------------------------------------------- 3. 转 .splat
-def to_splat(src, out_splat, max_points, up, quat_order):
+def to_splat(src, out_splat, max_points, up, quat_order, trim=0.0, opacity_min=None):
     if src.lower().endswith(".splat"):
         log("3/4", "本身就是 .splat，直接复制")
         shutil.copyfile(src, out_splat)
@@ -195,6 +196,10 @@ def to_splat(src, out_splat, max_points, up, quat_order):
         cmd += ["--up", "z-to-y"]
     if quat_order:
         cmd += ["--quat-order", quat_order]
+    if trim:
+        cmd += ["--trim", str(trim)]
+    if opacity_min is not None:
+        cmd += ["--opacity-min", str(opacity_min)]
     log("3/4", "PLY -> .splat（%s）" % human_size(src))
     res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if res.returncode != 0:
@@ -205,14 +210,82 @@ def to_splat(src, out_splat, max_points, up, quat_order):
             print("      " + line, flush=True)
 
 
+SPLAT_TRANSFORM = "@playcanvas/splat-transform@3.12.0"
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from colmap_camera import camera_from_colmap, bounds_from_colmap  # noqa: E402
+
+
+def npx_bin():
+    for name in ("npx.cmd", "npx"):
+        hit = shutil.which(name)
+        if hit:
+            return hit
+    return None
+
+
+def parse_points(text):
+    m = re.search(r"([\d.]+)\s*([KM]?)\s+gaussians", text or "")
+    if not m:
+        return None
+    mult = {"": 1, "K": 1000, "M": 1000000}[m.group(2)]
+    return int(round(float(m.group(1)) * mult))
+
+
+def to_format(src, out_path, fmt, max_points, up, quat_order, trim, opacity_min, filter_box=None):
+    """产出发布文件。fmt=splat 走自带转换器；spz/sog 走 @playcanvas/splat-transform（压缩比高）。
+    返回 (输出路径, 点数)。"""
+    if fmt == "splat":
+        to_splat(src, out_path, max_points, up, quat_order, trim, opacity_min)
+        return out_path, (os.path.getsize(out_path) // 32)
+
+    npx = npx_bin()
+    if npx is None:
+        print("[警告] 没找到 npx，装不了 splat-transform，退回 .splat", file=sys.stderr)
+        to_splat(src, out_path, max_points, up, quat_order, trim, opacity_min)
+        return out_path, (os.path.getsize(out_path) // 32)
+
+    cmd = [npx, "--yes", SPLAT_TRANSFORM, "-w", src]
+    if filter_box:
+        cmd += ["-B", filter_box]
+    if up == "z-to-y":
+        cmd += ["-r", "-90,0,0"]
+    if max_points:
+        cmd += ["-d", "%d" % max_points]
+    cmd.append(out_path)
+    log("3/4", "PLY -> .%s（%s，压缩中）" % (fmt, human_size(src)))
+    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if res.returncode != 0:
+        print((res.stdout or "")[-1500:], (res.stderr or "")[-1500:], file=sys.stderr)
+        die("压缩失败（%s）" % fmt)
+    for line in (res.stdout or "").splitlines():
+        if "gaussians" in line or "Writing" in line or line.strip().startswith("·"):
+            print("      " + line.strip(), flush=True)
+    points = parse_points(res.stdout) or parse_points(res.stderr)
+    if not points and fmt == "spz":
+        try:
+            with open(out_path, "rb") as f:
+                head = f.read(12)
+            if len(head) == 12:
+                points = struct.unpack("<III", head)[2]
+        except Exception:
+            points = None
+    return out_path, points
+
+
 # ---------------------------------------------------------------- 4. 发布
-def make_meta(scan_id, title, splat_path, extra_note=""):
-    points = os.path.getsize(splat_path) // 32
-    size_mb = os.path.getsize(splat_path) / 1048576.0
+def make_meta(scan_id, title, asset_path, extra_note="", points=None, camera=None):
+    if points is None:
+        if asset_path.lower().endswith(".splat"):
+            points = os.path.getsize(asset_path) // 32
+        else:
+            points = 0
+    size_mb = os.path.getsize(asset_path) / 1048576.0
     note = "自动生成：面积 / 朝向 / 居室还没填，量完尺寸后改 meta.json。"
     if extra_note:
         note += " " + extra_note
-    return {
+    asset_name = os.path.basename(asset_path)
+    meta = {
         "title": title,
         "captureNote": note,
         "metrics": [
@@ -225,31 +298,40 @@ def make_meta(scan_id, title, splat_path, extra_note=""):
             "id": "scene",
             "name": "全屋",
             "title": title,
-            "url": "scans/%s/scene.splat" % scan_id,
+            "url": "scans/%s/%s" % (scan_id, asset_name),
         }],
         "build": {
             "points": points,
             "sizeMB": round(size_mb, 2),
+            "format": os.path.splitext(asset_name)[1].lstrip("."),
             "generatedAt": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
         },
         "faq": DEFAULT_FAQ,
         "refuse": DEFAULT_REFUSE,
         "unknown": [],
     }
+    if camera:
+        meta["camera"] = camera
+    return meta
 
 
-def publish(scan_id, title, splat_src, public_dir, keep_meta=False):
+def publish(scan_id, title, asset_src, public_dir, keep_meta=False, points=None, camera=None):
     out_dir = os.path.join(public_dir, "scans", scan_id)
     os.makedirs(out_dir, exist_ok=True)
-    dst = os.path.join(out_dir, "scene.splat")
-    shutil.copyfile(splat_src, dst)
+    dst = os.path.join(out_dir, os.path.basename(asset_src))
+    shutil.copyfile(asset_src, dst)
+    # 换格式时清掉旧场景文件，免得浏览器继续吃缓存里的旧资产
+    for stale in ("scene.splat", "scene.spz", "scene.sog", "scene.ply"):
+        p = os.path.join(out_dir, stale)
+        if os.path.isfile(p) and os.path.abspath(p) != os.path.abspath(dst):
+            os.remove(p)
     log("4/4", "发布到 %s（%s）" % (os.path.relpath(out_dir, ROOT), human_size(dst)))
 
     meta_path = os.path.join(out_dir, "meta.json")
     if keep_meta and os.path.exists(meta_path):
         log("4/4", "保留已有的 meta.json（--keep-meta）")
     else:
-        meta = make_meta(scan_id, title, dst)
+        meta = make_meta(scan_id, title, dst, points=points, camera=camera)
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
         log("4/4", "写 meta.json（面积/朝向还是占位，记得补）")
@@ -306,6 +388,16 @@ def main(argv=None):
     ap.add_argument("--max-points", type=int, default=0, help="发布版最多多少高斯点（0=不限制）")
     ap.add_argument("--up", choices=["keep", "z-to-y"], default="keep", help="坐标轴修正，Z 朝上的扫描用 z-to-y")
     ap.add_argument("--quat-order", choices=["wxyz", "xyzw"], help="四元数顺序（画面出现梳齿/条纹时改成 xyzw）")
+    ap.add_argument("--trim", type=float, default=0.0,
+                    help="发布前按分位裁掉离群点（0=不裁；重建有飘浮噪声时用 1~2）")
+    ap.add_argument("--opacity-min", type=float, default=None,
+                    help="透明度剪枝阈值（默认 0.005，重建雾感重时提到 0.05~0.1）")
+    ap.add_argument("--format", choices=["splat", "spz", "sog"], default="splat",
+                    help="发布格式：splat（32B/点，无依赖）| spz（约 17B/点）| sog（约 14B/点，最省）")
+    ap.add_argument("--camera-from", help="COLMAP 的 sparse/0 目录：自动算出网页默认机位写进 meta.camera")
+    ap.add_argument("--filter-box", help="只保留这个盒子里的高斯：x,y,z,X,Y,Z（重建有飘浮离群点时用）")
+    ap.add_argument("--crop-cameras", type=float, metavar="PAD",
+                    help="按相机中心包围盒裁掉飘浮高斯，PAD 是外扩量（推荐 2.0；需配合 --camera-from）")
     ap.add_argument("--keep-meta", action="store_true", help="保留已有的 meta.json，只换 splat")
     ap.add_argument("--reindex", action="store_true", help="只重建 scans/index.json")
     ap.add_argument("--public-dir", default=os.path.join(ROOT, "public"))
@@ -331,7 +423,8 @@ def main(argv=None):
     title = args.title or scan_id
     scan_dir = os.path.join(ROOT, "data", "scans", scan_id)
     frames_dir = os.path.join(scan_dir, "frames")
-    work_splat = os.path.join(scan_dir, "scene.splat")
+    asset_ext = "splat" if args.format == "splat" else args.format
+    work_asset = os.path.join(scan_dir, "scene." + asset_ext)
     os.makedirs(scan_dir, exist_ok=True)
 
     print("房子 id：%s   显示名：%s\n" % (scan_id, title), flush=True)
@@ -379,11 +472,22 @@ def main(argv=None):
 
     log("2/4", "重建产物：%s（%s）" % (src, human_size(src)))
 
-    # 3. 转 .splat
-    to_splat(src, work_splat, args.max_points, args.up, args.quat_order)
+    # 3. 转成发布格式
+    _, points = to_format(src, work_asset, args.format, args.max_points, args.up,
+                          args.quat_order, args.trim, args.opacity_min, filter_box)
 
     # 4. 发布 + 索引
-    dst, meta_path = publish(scan_id, title, work_splat, args.public_dir, keep_meta=args.keep_meta)
+    camera = camera_from_colmap(args.camera_from) if args.camera_from else None
+    filter_box = args.filter_box
+    if args.crop_cameras and args.camera_from:
+        auto_box = bounds_from_colmap(args.camera_from, args.crop_cameras)
+        if auto_box:
+            log("3/4", "按相机包围盒裁剪（pad %s）：%s" % (args.crop_cameras, auto_box))
+            filter_box = auto_box if not filter_box else filter_box
+    if camera:
+        log("4/4", "默认机位：%s（fov %s°）" % (camera["position"], camera["fov"]))
+    dst, meta_path = publish(scan_id, title, work_asset, args.public_dir,
+                             keep_meta=args.keep_meta, points=points, camera=camera)
     index = rebuild_index(args.public_dir)
 
     print("""
