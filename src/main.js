@@ -357,6 +357,15 @@ function applyMeta(meta, entry) {
   state.meta = meta;
   state.scanId = entry.id;
   state.view = meta.camera || null;
+  // 有 COLMAP 真实机位时朝向已经是正的，隐藏"修正朝向"：翻了会把机位和几何拆开，画面更糟
+  state.upAxis = 'y';
+  const flipBtn = $('btnFlip');
+  if (flipBtn) {
+    flipBtn.hidden = !!state.view;
+    flipBtn.title = state.view
+      ? '这套房源的朝向已按拍摄时的相机位姿对齐，无需手动修正'
+      : '载入别人的 splat 后如果上下颠倒或躺平，点这里切 Y↑ / Z↑';
+  }
   document.title = (meta.title || entry.title || 'Room3D') + ' · Room3D';
   $('sceneTitle').textContent = meta.title || entry.title || '';
   renderMetrics(meta.metrics || []);
@@ -416,6 +425,7 @@ $('btnReset').onclick = () => {
 };
 
 $('btnFlip').onclick = () => {
+  if (state.view) return; // 真实扫描：朝向由 COLMAP 位姿决定，别手动翻
   state.upAxis = state.upAxis === 'y' ? 'z' : 'y';
   applyUpAxis();
   botSay('已切换坐标朝向（' + (state.upAxis === 'y' ? 'Y 轴朝上' : 'Z 轴朝上') + '）。真实扫描如果上下颠倒或者躺平，点这里。', 'warn');
