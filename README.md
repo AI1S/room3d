@@ -11,6 +11,8 @@
 > 和 `scans/dorm`（**手机实拍的真实宿舍**：1080p30 竖屏 4 分 12 秒 → 6fps 1514 帧 → COLMAP 注册 1468 张（97%）→ Brush 训练 100 万点 → .spz 14.5 MB / 89.4 万点）。
 > 顶栏的「房源下拉」就是切这三套；自己跑一次 `pipeline.py` 就会多出一套。
 
+> **当前卡点与待解决问题见 [docs/open-issues.md](docs/open-issues.md)**：重建结果「雾 / 虚」的现象、已经排除掉的猜测、真因判断和候选方案都记在那里。
+
 ![桌面端](docs/screenshots/desktop.png)
 ![手机端](docs/screenshots/mobile.png)
 
@@ -190,6 +192,7 @@ room3d/
 │  ├─ deploy.md               # 部署手册：GitHub → Vercel / Cloudflare Pages
 │  ├─ capture-sop.md          # 拍摄 SOP（拍之前看这份）
 │  ├─ log.md                  # 踩坑时间线：报错原文 + 当时的误判 + 修法
+│  ├─ open-issues.md          # 待解决问题：当前卡在哪、排除了哪些猜测、候选方案
 │  ├─ roadmap.md              # 8 周计划 + 验收标准
 │  └─ screenshots/            # 验收截图
 ├─ vercel.json                # 部署配置（构建命令 + .splat 的 content-type / 缓存头）
