@@ -179,6 +179,7 @@ room3d/
 ├─ docs/
 │  ├─ deploy.md               # 部署手册：GitHub → Vercel / Cloudflare Pages
 │  ├─ capture-sop.md          # 拍摄 SOP（拍之前看这份）
+│  ├─ log.md                  # 踩坑时间线：报错原文 + 当时的误判 + 修法
 │  ├─ roadmap.md              # 8 周计划 + 验收标准
 │  └─ screenshots/            # 验收截图
 ├─ vercel.json                # 部署配置（构建命令 + .splat 的 content-type / 缓存头）
@@ -197,7 +198,7 @@ room3d/
 ## 已知坑（踩过并修好的，别再踩）
 
 - **`/scans` 不要做代理**：演示数据在 `public/`，vite 里把 `/scans` 代理到后端会导致 502。现在只代理 `/api`。
-- **ffmpeg 未安装**：管线会直接告诉你装法，不要硬跑。`winget install Gyan.FFmpeg`，装完重开终端。
+- **ffmpeg 找不到 ≠ 没装**：本机其实装着（winget 的 Gyan 包），只是没进 PATH → `where ffmpeg` 为空。先 `winget list` 查，别急着重装；管线会自己按「PATH → 硬编码目录」找。
 - **PLY 转完"表面像梳子/条纹"**：四元数分量顺序不对，加 `--quat-order xyzw` 重转（3DGS 官方是 wxyz）。
 - **COLMAP 4.2 参数改名**：`--SiftExtraction.use_gpu` → `--FeatureExtraction.use_gpu`，`--SiftMatching.use_gpu` → `--FeatureMatching.use_gpu`。写旧名字会直接报错退出。
 - **Brush 没有 `brush.exe`**：压缩包里只有 `brush_app.exe`，不加 `--with-viewer` 就是纯命令行训练。
@@ -208,6 +209,7 @@ room3d/
 - **dev server 开着的时候改 `src/` 里的文件**：Windows 上偶尔报 `EIO`/`ReplaceFileW`（文件被 vite 监听占用），先停 dev server 再改。
 - **大文件**：场景是 7 MB 左右的静态文件，先看进度条（`onProgress`），不要以为卡死。
 - **打包体积**：`three` + `spark` 打包后 JS 约 3.2 MB（gzip 1.08 MB）。W2 只做了 .splat 长缓存，代码拆分留到以后。
+- **更多报错原文和当时的误判**：见 [docs/log.md](docs/log.md)——按阶段记的踩坑时间线（COLMAP 参数改名、Brush 没有 brush.exe、代理、Vercel 的 EPERM 软链等）。
 
 ## 体积账（为什么不像原方案那样卡 100 MB）
 
