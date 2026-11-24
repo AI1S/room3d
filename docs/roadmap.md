@@ -25,6 +25,13 @@
 - [x] `npm run build` 产物含 `scans/index.json`、`_headers`，preview 下 200，控制台零报错
 - [x] 仓库里留了一套 `scans/selftest`（28079 点的往返自测场景），用来在没 GPU 时也能演示"房源切换"
 
+**真实场景验收（2026-11-24，超出原计划）**：
+
+- [x] 手机实拍宿舍 1080p30 竖屏 4 分 12 秒 → `scripts/rebuild.sh` 一条命令：6fps 1514 帧 → COLMAP 注册 1468（97%，重投影 1.298 px）→ Brush 训练 20000 步 / 100 万点
+- [x] 发布 .spz **14.5 MB / 89.4 万点**（同一份数据 .splat 要 32 MB），线上 https://ai1s.github.io/room3d/#/scan/dorm 可打开、可转、可问答
+- [x] 默认机位用 COLMAP 位姿（`--camera-from`）而不是包围盒启发式——相机落在场景外时 3DGS 只会渲染出雾
+- [x] 排查记录写进 `docs/log.md` 4.6–4.8：多 COLMAP 模型混目录会让 Brush 拿错初始点、盲目降采样会把模型变成半透明雾、splat-transform 动作参数必须在输入之后
+
 重建环节保持手动（`--splat` 传 Postshot 导出结果），**不要为了自动化去啃 tiny-cuda-nn**。
 没装 ffmpeg 时管线会打印 `winget install Gyan.FFmpeg` 然后停在第 1 步，不会假装成功。
 
